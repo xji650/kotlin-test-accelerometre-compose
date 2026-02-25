@@ -11,10 +11,13 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Scaffold
@@ -28,92 +31,60 @@ import androidx.compose.ui.unit.dp
 import com.example.testaccelerometrecompose.ui.theme.TestAccelerometreComposeTheme
 
 class MainActivity : ComponentActivity(), SensorEventListener {
-
     private lateinit var sensorManager: SensorManager
-    private var lastUpdate: Long = 0
+    private val viewModel: SensorsViewModel by viewModels()
 
-    private var color : MutableState<Boolean> = mutableStateOf(false)
-
-        @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
-        override fun onCreate(savedInstanceState: Bundle?) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
-        sensorManager.registerListener(
-                this,
-                sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
-                SensorManager.SENSOR_DELAY_NORMAL
-            )
-        // register this class as a listener for the accelerometer sensor
-        lastUpdate = System.currentTimeMillis()
 
-        enableEdgeToEdge()
+        // Punto 1: Verificar disponibilidad y capacidades
+        val acc = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+        val light = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
+
+        viewModel.hasAccelerometer = acc != null
+        viewModel.hasLightSensor = light != null
+
+        acc?.let { viewModel.accelInfo = "Vendor: ${it.vendor}, Power: ${it.power}mA" }
+        light?.let { viewModel.maxLightRange = it.maximumRange }
+
         setContent {
             TestAccelerometreComposeTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) {
-                    SensorsInfo(color)
+                Scaffold { padding ->
+                    Box(modifier = Modifier.padding(padding)) {
+                        SensorsScreen(viewModel)
+                    }
                 }
             }
         }
     }
 
-    override fun onSensorChanged(p0: SensorEvent) {
-        getAccelerometer(p0)
-    }
-
-    override fun onAccuracyChanged(p0: Sensor?, p1: Int) {
-        if (p0?.type == Sensor.TYPE_LIGHT) Toast.makeText(
-            this,
-            getString(R.string.changAcc, p1),
-            Toast.LENGTH_SHORT
-        ).show()
-
-    }
-
-    private fun getAccelerometer(event: SensorEvent) {
-        val accelerationSquareRootThreshold = 200
-        val timeThreashold = 1000
-        val values = event.values
-
-        val x = values[0]
-        val y = values[1]
-        val z = values[2]
-        val accelerationSquareRoot = (x * x + y * y + z * z
-                / (SensorManager.GRAVITY_EARTH * SensorManager.GRAVITY_EARTH))
-        val actualTime = System.currentTimeMillis()
-        if (accelerationSquareRoot >= accelerationSquareRootThreshold) {
-            if (actualTime - lastUpdate < timeThreashold) {
-                return
-            }
-            lastUpdate = actualTime
-            Toast.makeText(this, R.string.shuffed, Toast.LENGTH_SHORT).show()
-            color.value = !(color.value)
+    // Punto 2 y 8: Registrar en onResume para garantizar reactivación
+    override fun onResume() {
+        super.onResume()
+        sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.also {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+        sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)?.also {
+            sensorManager.registerListener(this, it, SensorManager.SENSOR_DELAY_NORMAL)
         }
     }
 
+    // Punto 2 y 8: Desregistrar en onPause para ahorrar batería
     override fun onPause() {
-        // unregister listener
         super.onPause()
         sensorManager.unregisterListener(this)
     }
-}
 
-@Composable
-fun SensorsInfo(color: MutableState<Boolean> ) {
-    Card(
-        modifier = Modifier.fillMaxSize(),
-        colors = CardDefaults.cardColors(if (color.value) Color.Red else Color.Green),
-        shape = CardDefaults.shape,
-        elevation = CardDefaults.cardElevation(),
-        border = BorderStroke(10.dp, if (color.value) Color.Black else Color.LightGray)
-    ) {
-        Column() {
-            Text(text = "")
-            Row() {
-                Text(text = "            ")
-                Text(text = stringResource(R.string.shake))
-            }
+    override fun onSensorChanged(event: SensorEvent) {
+        when (event.sensor.type) {
+            Sensor.TYPE_ACCELEROMETER -> viewModel.processAccelerometer(event)
+            Sensor.TYPE_LIGHT -> viewModel.processLightData(event)
         }
     }
+
+    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
 }
+
+
 
